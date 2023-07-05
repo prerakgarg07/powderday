@@ -126,32 +126,55 @@ def make_image(m_imaging, par, model,dx,dy,dz):
         #wavs = [wav[0] for single_filter in filter_data for wav in single_filter]
         #wavs = list(set(wavs))      # Remove duplicates, if they exist
 
-        m_imaging.set_monochromatic(True, wavelengths=wavs)
         m_imaging.set_raytracing(True)
-        m_imaging.set_n_photons(initial=par.n_photons_initial,
-                                imaging_sources=par.n_photons_imaging,
-                                imaging_dust=par.n_photons_imaging,
-                                raytracing_sources=par.n_photons_raytracing_sources,
-                                raytracing_dust=par.n_photons_raytracing_dust)
+        
+        if cfg.par.SED_MONOCHROMATIC == True:
+            m_imaging.set_monochromatic(True, wavelengths=wavs)
+            m_imaging.set_n_photons(initial=par.n_photons_initial,
+                                    imaging_sources=par.n_photons_imaging,
+                                    imaging_dust=par.n_photons_imaging,
+                                    raytracing_sources=par.n_photons_raytracing_sources,
+                                    raytracing_dust=par.n_photons_raytracing_dust)
+                                                
+        else:
+            m_imaging.set_n_photons(initial=par.n_photons_initial, imaging=par.n_photons_imaging,
+                                    raytracing_sources=par.n_photons_raytracing_sources,
+                                    raytracing_dust=par.n_photons_raytracing_dust)
+            
     else:
         m_imaging.set_n_photons(initial=par.n_photons_initial, imaging=par.n_photons_imaging)
 
     m_imaging.set_n_initial_iterations(7)
     m_imaging.set_convergence(True, percentile=99., absolute=1.01, relative=1.01)
+    
+    llim = cfg.par.SED_MONOCHROMATIC_min_lam
+    hlim = cfg.par.SED_MONOCHROMATIC_max_lam
+    
+    N = 100
+    R = 1100
+    delta = np.log10((1+R)/R)
+    lam = np.arange(np.log10(llim), np.log10(hlim), delta)
+    lam_lim = 10**lam[0::N]
+    lam_lim = np.append(lam_lim, hlim)
+    #lam_lim = [0.15, 7.5, 15]
+    print ("Wav: ", lam_lim)
+    for k in range(len(lam_lim)-1):
+        image = m_imaging.add_peeled_images(sed=False, image=True)
 
-    image = m_imaging.add_peeled_images(sed=True, image=True)
+        if cfg.par.IMAGING_TRANSMISSION_FILTER == True:
+            add_transmission_filters(image)
 
-    if cfg.par.IMAGING_TRANSMISSION_FILTER == True:
-        add_transmission_filters(image)
+        if cfg.par.MANUAL_ORIENTATION == True:
+            image.set_viewing_angles(np.array(cfg.par.THETA), np.array(cfg.par.PHI))
+        else:
+            image.set_viewing_angles(np.linspace(0, 90, par.NTHETA).tolist()*par.NPHI, np.repeat(np.linspace(0, 90, par.NPHI), par.NPHI))
 
-    if cfg.par.MANUAL_ORIENTATION == True:
-        image.set_viewing_angles(np.array(cfg.par.THETA), np.array(cfg.par.PHI))
-    else:
-        image.set_viewing_angles(np.linspace(0, 90, par.NTHETA).tolist()*par.NPHI, np.repeat(np.linspace(0, 90, par.NPHI), par.NPHI))
+        image.set_track_origin('basic')
+        image.set_image_size(cfg.par.npix_x, cfg.par.npix_y)
+        image.set_image_limits(-dx/2., dx/2., -dy/2., dy/2.)
 
-    image.set_track_origin('basic')
-    image.set_image_size(cfg.par.npix_x, cfg.par.npix_y)
-    image.set_image_limits(-dx/2., dx/2., -dy/2., dy/2.)
+        print("RT for wavelenghts: ",lam_lim[k], " to ", lam_lim[k+1])
+        image.set_wavelength_range(N, lam_lim[k], lam_lim[k+1])
 
     m_imaging.write(model.inputfile+'.image', overwrite=True)
     m_imaging.run(model.outputfile+'.image', mpi=True, n_processes=par.n_MPI_processes, overwrite=True)
